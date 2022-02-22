@@ -161,6 +161,7 @@ type SocketOptions struct {
 	CompletionRingNumDescs int
 	RxRingNumDescs         int
 	TxRingNumDescs         int
+	LazyFreeRXDesc         bool
 }
 
 // Desc represents an XDP Rx/Tx descriptor.
@@ -432,7 +433,9 @@ func (xsk *Socket) Receive(num int) []Desc {
 	for i := 0; i < num; i++ {
 		descs = append(descs, xsk.rxRing.Descs[cons&uint32(xsk.options.RxRingNumDescs-1)])
 		cons++
-		xsk.freeRXDescs[descs[i].Addr/uint64(xsk.options.FrameSize)] = true
+		if !xsk.options.LazyFreeRXDesc {
+			xsk.freeRXDescs[descs[i].Addr/uint64(xsk.options.FrameSize)] = true
+		}
 	}
 	//fencer.MFence()
 	*xsk.rxRing.Consumer = cons
@@ -440,6 +443,15 @@ func (xsk *Socket) Receive(num int) []Desc {
 	xsk.numFilled -= len(descs)
 
 	return descs
+}
+
+// Free the descriptors to the freelist
+func (xsk *Socket) FreeRXDescs(descs []Desc) {
+	if xsk.options.LazyFreeRXDesc {
+		for i := 0; i < len(descs); i++ {
+			xsk.freeRXDescs[descs[i].Addr/uint64(xsk.options.FrameSize)] = true
+		}
+	}
 }
 
 // Transmit submits the given descriptors to be sent out, it returns how many
